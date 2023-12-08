@@ -60,3 +60,61 @@ In the root folder, run `python scripts/train.py`, the default visual encoder is
 The ViT given in the example has the following parameters:
 `hidden_size=64, num_hidden_layers=1, num_attention_heads=4, intermediate_size=64, hidden_dropout_prob=0.2, image_size=64`
 this is a minimal ViT but training still takes at least 9 GB of GPU memory on Nvidia RTX 8000.
+
+### Deploy a trained model
+
+If the Intel Realsense depth camera is mounted on the Unitree Go1 and neural network inference is being done on external computers, then LCM communication can be used to transfer depth images from depth camera to the external computers. To publish the depth images, run `python3 depth_lcm/camera_msgs_pub.py`, and to test if LCM communication is established successfully, run `python3 depth_lcm/camera_msgs_sub.py` in a new terminal and check whether images are being saved.
+
+If the Intel Realsense depth camera and the computing device is connected directly, the images can be read without the use of LCM communication.
+
+### Installing the Deployment Utility
+
+The first step is to connect your development machine to the robot using ethernet. You should ping the robot to verify the connection: `ping 192.168.123.15` should return `x packets transmitted, x received, 0% packet loss`.
+
+Once you have confirmed the robot is connected, run the following command on your computer to transfer files to the robot. The first time you run it, the script will download and transfer the zipped docker image for development on the robot (`deployment_image.tar`). This file is quite large (3.5GB), but it only needs to be downloaded and transferred once.
+
+```
+cd go1_gym_deploy/scripts && ./send_to_unitree.sh
+```
+
+Next, you will log onto the robot's onboard computer and install the docker environment. To enter the onboard computer, the command is:
+
+```
+ssh unitree@192.168.123.15
+```
+
+Now, run the following commands on the robot's onboard computer:
+
+```
+chmod +x installer/install_deployment_code.sh
+cd ~/go1_gym/go1_gym_deploy/scripts
+sudo ../installer/install_deployment_code.sh
+```
+
+The installer will automatically unzip and install the docker image containing the deployment environment. 
+
+### Setting up LCM communication
+
+The Unitree Go1 and the external computer need to be under the same sub-net, the static ip needs to be set everytime on the external computer by running `sudo ifconfig -v eth0 192.168.123.xxx`, replacing `xxx` with viable number between 1-255.
+
+### Running the Controller  <a name="runcontroller"></a>
+
+Place the robot into damping mode. The control sequence is: [L2+A], [L2+B], [L1+L2+START]. After this, the robot should sit on the ground and the joints should move freely. 
+
+If the neural network policy is run on an external computer, the following two commands need to be run on the same machine.
+
+First:
+```
+cd ~/go1_gym/go1_gym_deploy/unitree_legged_sdk_bin
+sudo ./lcm_position
+```
+
+Open up a new terminal and run the following command.
+
+Second:
+```
+cd ~/go1_gym/go1_gym_deploy/scripts
+python3 deploy_policy.py
+```
+
+The robot will wait for you to press [R2], then calibrate, then wait for a second press of [R2] before running the control loop.

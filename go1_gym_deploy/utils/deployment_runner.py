@@ -7,7 +7,7 @@ from go1_gym_deploy.lcm_types.camera_message_lcmt import camera_message_lcmt
 import numpy as np
 import torch
 import threading
-from depth_tests.realsense import Go1RealSense
+from depth_lcm.realsense import Go1RealSense
 from go1_gym_deploy.utils.logger import MultiLogger
 
 
