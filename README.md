@@ -11,6 +11,18 @@ and:
       <b> Learning Vision-Guided Quadrupedal Locomotion End-to-End with Cross-Modal Transformers </b>
     </a>
 
+The simulator we used is Isaac Gym from Nvidia (Paper: https://arxiv.org/abs/2108.10470); the Isaac Gym terrain and utilities code in `go1_gym` is built upon the 
+<a href=https://github.com/leggedrobotics/legged_gym target="_blank">
+    <b> Isaac Gym Environments for Legged Robots </b>
+</a>
+by Nikita Rudin, Robotic Systems Lab, ETH Zurich (Paper: https://arxiv.org/abs/2109.11978); the training structure in `go1_gym_learn/ppo_cse/actor_critic.py` is built upon
+walk-these-ways `actor_critic.py` code in the same folder; `go1_gym_learn/ppo_cse/ppo.py` builds upon the 
+<a href=https://github.com/leggedrobotics/rsl_rl target="_blank">
+    <b> RSL RL </b>
+</a>
+repo developed by Nikita at Robotic Systems Lab, ETH Zurich; the deployment code in `go1_gym_deploy` builds upon the work from walk-these-ways, we modified the `deploy_policy.py`, `deployment_runner.py` and files in `utils` folder.
+
+
 ## Results
 
 
