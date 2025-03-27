@@ -89,7 +89,7 @@ class Runner:
 
         self.env.reset()
 
-    def learn(self, num_learning_iterations, init_at_random_ep_len=False, eval_freq=100, eval_expert=False):
+    def learn(self, num_learning_iterations, init_at_random_ep_len=False, eval_freq=100, eval_expert=True):
         from ml_logger import logger
         # initialize writer
         assert logger.prefix, "you will overwrite the entire instrument server"
@@ -127,15 +127,19 @@ class Runner:
                 for i in range(self.num_steps_per_env):
                     actions_train = self.alg.act(obs[:num_train_envs], privileged_obs[:num_train_envs],
                                                  obs_history[:num_train_envs])
-                    if eval_expert:
-                        actions_eval = self.alg.actor_critic.act_teacher(obs[num_train_envs:],
-                                                                         privileged_obs[num_train_envs:])
-                    else:
-                        actions_eval = self.alg.actor_critic.act_student(obs[num_train_envs:],
-                                                                         obs_history[num_train_envs:])
-                    ret = self.env.step(torch.cat((actions_train, actions_eval), dim=0))
+                    # if eval_expert:
+                    #     actions_eval = self.alg.actor_critic.act_teacher(obs[num_train_envs:],
+                    #                                                      privileged_obs[num_train_envs:])
+                    # else:
+                    #     actions_eval = self.alg.actor_critic.act_student(obs[num_train_envs:],
+                    #                                                      obs_history[num_train_envs:])
+                    # print("actions_train",actions_train.shape)
+                    # print("actions_eval",actions_eval.shape)
+                    # print("torch.cat((actions_train, actions_eval",torch.cat((actions_train, actions_eval).shape))
+                    # ret = self.env.step(torch.cat((actions_train, actions_eval), dim=0))
+                    ret = self.env.step(actions_train)
                     obs_dict, rewards, dones, infos = ret
-                    obs, privileged_obs, obs_history = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict[
+                    obs, privileged_obs, depth_obs, obs_history = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict["depth_obs"], obs_dict[
                         "obs_history"]
 
                     obs, privileged_obs, obs_history, rewards, dones = obs.to(self.device), privileged_obs.to(
@@ -191,8 +195,8 @@ class Runner:
                 # Learning step
                 self.alg.compute_returns(obs[:num_train_envs], privileged_obs[:num_train_envs])
 
-                if it % eval_freq == 0:
-                    self.env.reset_evaluation_envs()
+                # if it % eval_freq == 0:
+                #     self.env.reset_evaluation_envs()
 
                 if it % eval_freq == 0:
                     logger.save_pkl({"iteration": it,

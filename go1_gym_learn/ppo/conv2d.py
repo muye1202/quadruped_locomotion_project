@@ -1,7 +1,5 @@
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 from go1_gym_learn.ppo.mlp import MlpModel
 
@@ -150,35 +148,3 @@ class Conv2dHeadModel(torch.nn.Module):
     def output_size(self):
         """Returns the final output size after MLP head."""
         return self._output_size
-
-
-
-class DepthEncoder(nn.Module):
-    def __init__(self):
-        super(DepthEncoder, self).__init__()
-        
-        # Convolutional layers
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1)
-        
-        # Fully connected layers
-        self.fc1 = nn.Linear(128 * 24 * 32, 512)
-        self.fc2 = nn.Linear(512, 64)
-
-    def forward(self, x):
-        if x.size(0) == 0:
-            return torch.empty((0, 64)).to("cuda:0")
-        # Apply convolutional layers
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        
-        # Flatten the tensor
-        x = x.view(x.size(0), -1)
-        
-        # Apply fully connected layers
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
-        
-        return x
