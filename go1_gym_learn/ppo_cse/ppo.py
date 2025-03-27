@@ -44,6 +44,7 @@ class PPO:
         self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=PPO_Args.learning_rate)
         self.adaptation_module_optimizer = optim.Adam(self.actor_critic.parameters(),
                                                       lr=PPO_Args.adaptation_module_learning_rate)
+
         if self.actor_critic.decoder:
             self.decoder_optimizer = optim.Adam(self.actor_critic.parameters(),
                                                           lr=PPO_Args.adaptation_module_learning_rate)
@@ -53,6 +54,7 @@ class PPO:
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, privileged_obs_shape, obs_history_shape,
                      action_shape):
+        print("obs_history_shape",obs_history_shape)
         self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, privileged_obs_shape,
                                       obs_history_shape, action_shape, self.device)
 
@@ -62,10 +64,10 @@ class PPO:
     def train_mode(self):
         self.actor_critic.train()
 
-    def act(self, obs, privileged_obs, obs_history):
+    def act(self, obs, privileged_obs, depth_obs, obs_history):
         # Compute the actions and values
-        self.transition.actions = self.actor_critic.act(obs_history).detach()
-        self.transition.values = self.actor_critic.evaluate(obs_history, privileged_obs).detach()
+        self.transition.actions = self.actor_critic.act(obs_history, depth_obs).detach()
+        self.transition.values = self.actor_critic.evaluate(obs_history, privileged_obs, depth_obs).detach()
         self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
         self.transition.action_mean = self.actor_critic.action_mean.detach()
         self.transition.action_sigma = self.actor_critic.action_std.detach()
@@ -73,6 +75,7 @@ class PPO:
         self.transition.observations = obs
         self.transition.critic_observations = obs
         self.transition.privileged_observations = privileged_obs
+        self.transition.depth_observations = depth_obs
         self.transition.observation_histories = obs_history
         return self.transition.actions
 
@@ -90,8 +93,8 @@ class PPO:
         self.transition.clear()
         self.actor_critic.reset(dones)
 
-    def compute_returns(self, last_critic_obs, last_critic_privileged_obs):
-        last_values = self.actor_critic.evaluate(last_critic_obs, last_critic_privileged_obs).detach()
+    def compute_returns(self, last_critic_obs, last_critic_privileged_obs, last_critic_depth_obs):
+        last_values = self.actor_critic.evaluate(last_critic_obs, last_critic_privileged_obs, last_critic_depth_obs).detach()
         self.storage.compute_returns(last_values, PPO_Args.gamma, PPO_Args.lam)
 
     def update(self):
@@ -104,12 +107,12 @@ class PPO:
         mean_decoder_test_loss = 0
         mean_decoder_test_loss_student = 0
         generator = self.storage.mini_batch_generator(PPO_Args.num_mini_batches, PPO_Args.num_learning_epochs)
-        for obs_batch, critic_obs_batch, privileged_obs_batch, obs_history_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
+        for obs_batch, critic_obs_batch, privileged_obs_batch, depth_obs_batch, obs_history_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
             old_mu_batch, old_sigma_batch, masks_batch, env_bins_batch in generator:
 
-            self.actor_critic.act(obs_history_batch, masks=masks_batch)
+            self.actor_critic.act(obs_history_batch, depth_obs_batch, masks=masks_batch)
             actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
-            value_batch = self.actor_critic.evaluate(obs_history_batch, privileged_obs_batch, masks=masks_batch)
+            value_batch = self.actor_critic.evaluate(obs_history_batch, privileged_obs_batch, depth_obs_batch, masks=masks_batch)
             mu_batch = self.actor_critic.action_mean
             sigma_batch = self.actor_critic.action_std
             entropy_batch = self.actor_critic.entropy
@@ -166,8 +169,9 @@ class PPO:
             # Adaptation module gradient step
 
             for epoch in range(PPO_Args.num_adaptation_module_substeps):
-
-                adaptation_pred = self.actor_critic.adaptation_module(obs_history_batch)
+                depth_latent_batch = self.actor_critic.depth_encoder(depth_obs_batch)
+                concat_adaptation_input = torch.cat((obs_history_batch, depth_latent_batch),dim=-1)
+                adaptation_pred = self.actor_critic.adaptation_module(concat_adaptation_input)
                 with torch.no_grad():
                     adaptation_target = privileged_obs_batch
                     # residual = (adaptation_target - adaptation_pred).norm(dim=1)

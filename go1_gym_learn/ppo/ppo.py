@@ -153,22 +153,22 @@ class PPO:
             mean_surrogate_loss += surrogate_loss.item()
 
             # Adaptation module gradient step
-            for epoch in range(PPO_Args.num_adaptation_module_substeps):
-                adaptation_pred = self.actor_critic.adaptation_module(obs_history_batch)
-                with torch.no_grad():
-                    adaptation_target = self.actor_critic.env_factor_encoder(privileged_obs_batch)
-                    residual = (adaptation_target - adaptation_pred).norm(dim=1)
-                    caches.slot_cache.log(env_bins_batch[:, 0].cpu().numpy().astype(np.uint8),
-                                          sysid_residual=residual.cpu().numpy())
+            # for epoch in range(PPO_Args.num_adaptation_module_substeps):
+            #     adaptation_pred = self.actor_critic.adaptation_module(obs_history_batch)
+            #     with torch.no_grad():
+            #         adaptation_target = self.actor_critic.env_factor_encoder(privileged_obs_batch)
+            #         residual = (adaptation_target - adaptation_pred).norm(dim=1)
+            #         caches.slot_cache.log(env_bins_batch[:, 0].cpu().numpy().astype(np.uint8),
+            #                               sysid_residual=residual.cpu().numpy())
 
-                adaptation_loss = F.mse_loss(adaptation_pred, adaptation_target)
+            #     adaptation_loss = F.mse_loss(adaptation_pred, adaptation_target)
 
-                self.adaptation_module_optimizer.zero_grad()
-                adaptation_loss.backward()
-                self.adaptation_module_optimizer.step()
+            #     self.adaptation_module_optimizer.zero_grad()
+            #     adaptation_loss.backward()
+            #     self.adaptation_module_optimizer.step()
 
-                mean_adaptation_module_loss += adaptation_loss.item()
-
+            #     mean_adaptation_module_loss += adaptation_loss.item()
+        mean_adaptation_module_loss = 0
         num_updates = PPO_Args.num_learning_epochs * PPO_Args.num_mini_batches
         mean_value_loss /= num_updates
         mean_surrogate_loss /= num_updates

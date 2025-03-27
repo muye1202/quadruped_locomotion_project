@@ -47,21 +47,21 @@ class RunnerArgs(PrefixProto, cli=False):
     max_iterations = 1500  # number of policy updates
 
     # logging
-    save_interval = 400  # check for potential saves every this many iterations
+    save_interval = 100  # check for potential saves every this many iterations
     save_video_interval = 100
     log_freq = 10
 
     # load and resume
-    resume = False
+    resume = True
     load_run = -1  # -1 = last run
     checkpoint = -1  # -1 = last saved model
     resume_path = None  # updated from load_run and chkpt
-    resume_curriculum = True
+    resume_curriculum = False
 
 
 class Runner:
 
-    def __init__(self, env, device='cpu', visual_encoder="vit"):
+    def __init__(self, env, device='cpu'):
         from .ppo import PPO
 
         self.device = device
@@ -71,16 +71,20 @@ class Runner:
                                       self.env.num_privileged_obs,
                                       self.env.num_obs_history,
                                       self.env.num_actions,
-                                      visual_encoder
                                       ).to(self.device)
 
         if RunnerArgs.resume:
+            print("in runner resume")
             # load pretrained weights from resume_path
             from ml_logger import ML_Logger
-            loader = ML_Logger(root="http://escher.csail.mit.edu:8080",
-                               prefix=RunnerArgs.resume_path)
-            weights = loader.load_torch("checkpoints/ac_weights_last.pt")
-            actor_critic.load_state_dict(state_dict=weights)
+            # loader = ML_Logger(root="http://escher.csail.mit.edu:8080",
+            #                    prefix=RunnerArgs.resume_path)
+            # loader = ML_Logger(root="http://localhost:8080",
+            #         prefix="runs/gait-conditioned-agility/pretrain-v0")
+            # weights = loader.load_torch("checkpoints/ac_weights_last.pt")
+            weights = torch.load("runs/gait-conditioned-agility/pretrain-v0/train/025417.456545/checkpoints/ac_weights_last.pt")        
+            filtered_weights = {k: v for k, v in weights.items() if "adaptation_module" not in k}
+            actor_critic.load_state_dict(state_dict=filtered_weights, strict=False)
 
             if hasattr(self.env, "curricula") and RunnerArgs.resume_curriculum:
                 # load curriculum state
@@ -120,8 +124,8 @@ class Runner:
         num_train_envs = self.env.num_train_envs
 
         obs_dict = self.env.get_observations()  # TODO: check, is this correct on the first step?
-        obs, privileged_obs, obs_history = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict["obs_history"]
-        obs, privileged_obs, obs_history = obs.to(self.device), privileged_obs.to(self.device), obs_history.to(
+        obs, privileged_obs, depth_obs, obs_history = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict["depth_obs"], obs_dict["obs_history"]
+        obs, privileged_obs, depth_obs, obs_history = obs.to(self.device), privileged_obs.to(self.device), depth_obs.to(self.device), obs_history.to(
             self.device)
         self.alg.actor_critic.train()  # switch to train mode (for dropout for example)
 
@@ -138,20 +142,20 @@ class Runner:
             # Rollout
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
-                    actions_train = self.alg.act(obs[:num_train_envs], privileged_obs[:num_train_envs],
+                    actions_train = self.alg.act(obs[:num_train_envs], privileged_obs[:num_train_envs], depth_obs[:num_train_envs],
                                                  obs_history[:num_train_envs])
                     if eval_expert:
                         actions_eval = self.alg.actor_critic.act_teacher(obs_history[num_train_envs:],
                                                                          privileged_obs[num_train_envs:])
                     else:
-                        actions_eval = self.alg.actor_critic.act_student(obs_history[num_train_envs:])
+                        actions_eval = self.alg.actor_critic.act_student(obs_history[num_train_envs:], depth_obs[num_train_envs:])
                     ret = self.env.step(torch.cat((actions_train, actions_eval), dim=0))
                     obs_dict, rewards, dones, infos = ret
                     obs, privileged_obs, obs_history = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict[
                         "obs_history"]
 
-                    obs, privileged_obs, obs_history, rewards, dones = obs.to(self.device), privileged_obs.to(
-                        self.device), obs_history.to(self.device), rewards.to(self.device), dones.to(self.device)
+                    obs, privileged_obs, depth_obs, obs_history, rewards, dones = obs.to(self.device), privileged_obs.to(
+                        self.device), depth_obs.to(self.device), obs_history.to(self.device), rewards.to(self.device), dones.to(self.device)
                     self.alg.process_env_step(rewards[:num_train_envs], dones[:num_train_envs], infos)
 
                     if 'train/episode' in infos:
@@ -189,7 +193,7 @@ class Runner:
 
                 # Learning step
                 start = stop
-                self.alg.compute_returns(obs_history[:num_train_envs], privileged_obs[:num_train_envs])
+                self.alg.compute_returns(obs_history[:num_train_envs], privileged_obs[:num_train_envs], depth_obs[:num_train_envs])
 
                 if it % curriculum_dump_freq == 0:
                     logger.save_pkl({"iteration": it,
@@ -237,6 +241,11 @@ class Runner:
                     path = './tmp/legged_data'
 
                     os.makedirs(path, exist_ok=True)
+                    
+                    depth_encoder_module_path = f'{path}/depth_encoder_module_latest.jit'
+                    depth_encoder_module = copy.deepcopy(self.alg.actor_critic.depth_encoder).to('cpu')
+                    traced_script_depth_encoder_module = torch.jit.script(depth_encoder_module)
+                    traced_script_depth_encoder_module.save(depth_encoder_module_path)                      
 
                     adaptation_module_path = f'{path}/adaptation_module_latest.jit'
                     adaptation_module = copy.deepcopy(self.alg.actor_critic.adaptation_module).to('cpu')
@@ -260,6 +269,11 @@ class Runner:
             path = './tmp/legged_data'
 
             os.makedirs(path, exist_ok=True)
+
+            depth_encoder_module_path = f'{path}/depth_encoder_module_latest.jit'
+            depth_encoder_module = copy.deepcopy(self.alg.actor_critic.depth_encoder).to('cpu')
+            traced_script_depth_encoder_module = torch.jit.script(depth_encoder_module)
+            traced_script_depth_encoder_module.save(depth_encoder_module_path)            
 
             adaptation_module_path = f'{path}/adaptation_module_latest.jit'
             adaptation_module = copy.deepcopy(self.alg.actor_critic.adaptation_module).to('cpu')

@@ -5,6 +5,7 @@ import torch.nn as nn
 from params_proto import PrefixProto
 from torch.distributions import Normal
 
+from go1_gym_learn.ppo.conv2d import Conv2dHeadModel
 
 class AC_Args(PrefixProto, cli=False):
     # policy
@@ -73,11 +74,14 @@ class ActorCritic(nn.Module):
         self.adaptation_module = nn.Sequential(*adaptation_module_layers)
         self.add_module(f"adaptation_module", self.adaptation_module)
 
-        total_latent_dim = int(torch.sum(torch.Tensor(AC_Args.env_factor_encoder_branch_latent_dims)))
+        # total_latent_dim = int(torch.sum(torch.Tensor(AC_Args.env_factor_encoder_branch_latent_dims)))
+        #Guo, fix the visual latent shape
+        total_latent_dim = 256
 
         # Policy
         actor_layers = []
-        actor_layers.append(nn.Linear(total_latent_dim + num_obs, AC_Args.actor_hidden_dims[0]))
+        actor_layers.append(nn.Linear(326, AC_Args.actor_hidden_dims[0]))
+        # actor_layers.append(nn.Linear(total_latent_dim + num_obs, AC_Args.actor_hidden_dims[0]))
         actor_layers.append(activation)
         for l in range(len(AC_Args.actor_hidden_dims)):
             if l == len(AC_Args.actor_hidden_dims) - 1:
@@ -89,7 +93,8 @@ class ActorCritic(nn.Module):
 
         # Value function
         critic_layers = []
-        critic_layers.append(nn.Linear(total_latent_dim + num_obs, AC_Args.critic_hidden_dims[0]))
+        critic_layers.append(nn.Linear(326, AC_Args.critic_hidden_dims[0]))
+        # critic_layers.append(nn.Linear(total_latent_dim + num_obs, AC_Args.critic_hidden_dims[0]))
         critic_layers.append(activation)
         for l in range(len(AC_Args.critic_hidden_dims)):
             if l == len(AC_Args.critic_hidden_dims) - 1:
@@ -109,6 +114,22 @@ class ActorCritic(nn.Module):
         self.distribution = None
         # disable args validation for speedup
         Normal.set_default_validate_args = False
+
+        #Guo
+        self.visual_obs_slice = slice(70, 3142, None), (1, 48, 64)
+        self.visual_latent_size = 256
+        self.visual_kwargs = dict(
+            channels= [64, 64],
+            kernel_sizes= [3, 3],
+            strides= [1, 1],
+            hidden_sizes= [256],
+        )
+
+        self.visual_encoder = Conv2dHeadModel(
+            image_shape= self.visual_obs_slice[1],
+            output_size= self.visual_latent_size,
+            **self.visual_kwargs,
+        )
 
     @staticmethod
     # not used at the moment
@@ -135,11 +156,33 @@ class ActorCritic(nn.Module):
         return self.distribution.entropy().sum(dim=-1)
 
     def update_distribution(self, observations, privileged_observations):
-        latent = self.env_factor_encoder(privileged_observations)
-        mean = self.actor_body(torch.cat((observations, latent), dim=-1))
+        # latent = self.adaptation_module(observation_history[..., :self.visual_obs_slice[0].start])
+        # print("observations",observations.shape)
+        # print("privileged_observations",privileged_observations.shape)
+        # latent = self.env_factor_encoder(privileged_observations)
+        visual_latent = self.embed_visual_latent(observations[..., self.visual_obs_slice[0]].reshape(-1, *self.visual_obs_slice[1])) # (num_env, 256)
+        # print("visual_latent",visual_latent.shape)
+        # print("input shape",torch.cat((observations[..., :self.visual_obs_slice[0].start], visual_latent), dim=-1).shape)
+        mean = self.actor_body(torch.cat((observations[..., :self.visual_obs_slice[0].start], visual_latent), dim=-1))
         self.distribution = Normal(mean, mean * 0. + self.std)
 
+    def embed_visual_latent(self, visual_observations):
+        # leading_dims = visual_observations.shape[:-1]
+        # print("self.visual_obs_slice[1]",self.visual_obs_slice[1])
+        # visual_latent = self.visual_encoder(
+        #     observations[..., self.visual_obs_slice[0]].reshape(-1, *self.visual_obs_slice[1])
+        # ).reshape(*leading_dims, -1)
+        # obs = torch.cat([
+        #     observations[..., :self.visual_obs_slice[0].start],
+        #     visual_latent,
+        #     observations[..., self.visual_obs_slice[0].stop:],
+        # ], dim= -1)
+        # visual_latent = self.visual_encoder(visual_observations).reshape(*leading_dims, -1)
+        visual_latent = self.visual_encoder(visual_observations)
+        return visual_latent
+
     def act(self, observations, privileged_observations, **kwargs):
+        # observations = self.embed_visual_latent(observations)
         self.update_distribution(observations, privileged_observations)
         return self.distribution.sample()
 
@@ -163,13 +206,16 @@ class ActorCritic(nn.Module):
 
     def act_teacher(self, observations, privileged_info, policy_info={}):
         latent = self.env_factor_encoder(privileged_info)
-        actions_mean = self.actor_body(torch.cat((observations, latent), dim=-1))
+        # visual_latent = self.embed_visual_latent(observations[..., self.visual_obs_slice[0]].reshape(-1, *self.visual_obs_slice[1])) # (num_env, 256)
+        actions_mean = self.actor_body(torch.cat((observations, visual_latent), dim=-1))
         policy_info["latents"] = latent.detach().cpu().numpy()
         return actions_mean
 
     def evaluate(self, critic_observations, privileged_observations, **kwargs):
-        latent = self.env_factor_encoder(privileged_observations)
-        value = self.critic_body(torch.cat((critic_observations, latent), dim=-1))
+        # latent = self.env_factor_encoder(privileged_observations)
+        visual_latent = self.embed_visual_latent(critic_observations[..., self.visual_obs_slice[0]].reshape(-1, *self.visual_obs_slice[1])) # (num_env, 256)
+        # value = self.critic_body(torch.cat((critic_observations, latent), dim=-1))
+        value = self.critic_body(torch.cat((critic_observations[..., :self.visual_obs_slice[0].start], visual_latent), dim=-1))
         return value
 
 

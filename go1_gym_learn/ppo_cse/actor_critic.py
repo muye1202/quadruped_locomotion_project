@@ -2,9 +2,8 @@ import torch
 import torch.nn as nn
 from params_proto import PrefixProto
 from torch.distributions import Normal
-from go1_gym_learn.ppo_cse.conv2d import Conv2dHeadModel, DepthEncoder
-from transformers import ViTConfig, ViTModel
 
+from go1_gym_learn.ppo_cse.conv2d import Conv2dHeadModel, DepthEncoder
 
 class AC_Args(PrefixProto, cli=False):
     # policy
@@ -25,7 +24,6 @@ class ActorCritic(nn.Module):
                  num_privileged_obs,
                  num_obs_history,
                  num_actions,
-                 visual_encoder,
                  **kwargs):
         if kwargs:
             print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str(
@@ -53,6 +51,8 @@ class ActorCritic(nn.Module):
                               AC_Args.adaptation_module_branch_hidden_dims[l + 1]))
                 adaptation_module_layers.append(activation)
         self.adaptation_module = nn.Sequential(*adaptation_module_layers)
+
+
 
         # Policy
         actor_layers = []
@@ -88,8 +88,9 @@ class ActorCritic(nn.Module):
         # disable args validation for speedup
         Normal.set_default_validate_args = False
 
+
         #Guo
-        ##############
+        # self.visual_obs_slice = slice(48, 3120, None), (1, 48, 64)
         self.visual_obs_slice = slice(70, 3142, None), (1, 48, 64)
         self.visual_latent_size = 256
         self.visual_kwargs = dict(
@@ -105,17 +106,7 @@ class ActorCritic(nn.Module):
             **self.visual_kwargs,
         )
 
-        ##############
-        
-        # Muye --> Use ViT as depth encoder
-        vit_config = ViTConfig(hidden_size=64, num_hidden_layers=1, num_attention_heads=4, intermediate_size=64, hidden_dropout_prob=0.2
-                               , image_size=64, num_channels = 1,return_dict=False)
-        model = ViTModel(vit_config)
-        
-        if visual_encoder == "vit":
-            self.depth_encoder = model
-        else:
-            self.depth_encoder = DepthEncoder()
+        self.depth_encoder = DepthEncoder()
 
     @staticmethod
     # not used at the moment
@@ -143,16 +134,10 @@ class ActorCritic(nn.Module):
 
     def update_distribution(self, observation_history, depth_obs):
         #Guo, add depth latent
-        
-        depth_obs = torch.nn.functional.interpolate(depth_obs,size=(64,64))
-        # print("depth_obs",depth_obs.shape)
-        depth_latent = self.depth_encoder(depth_obs)[1]
-        # print("depth_latent_0",depth_latent[0].shape)
-        # print("depth_latent_1",depth_latent[1].shape)
-
+        depth_latent = self.depth_encoder(depth_obs)
         concat_adaptation_input = torch.cat((observation_history, depth_latent),dim=-1)
         latent = self.adaptation_module(concat_adaptation_input)
-
+        # 
         # mean = self.actor_body(torch.cat((observation_history, latent), dim=-1))
         mean = self.actor_body(torch.cat((observation_history, latent), dim=-1))
         self.distribution = Normal(mean, mean * 0. + self.std)
@@ -171,8 +156,7 @@ class ActorCritic(nn.Module):
         return self.act_student(ob["obs_history"], policy_info=policy_info)
 
     def act_student(self, observation_history, depth_observations, policy_info={}):
-        depth_observations = torch.nn.functional.interpolate(depth_observations,size=(64,64))
-        depth_latent = self.depth_encoder(depth_observations)[1]
+        depth_latent = self.depth_encoder(depth_observations)
         concat_adaptation_input = torch.cat((observation_history, depth_latent),dim=-1)
         latent = self.adaptation_module(concat_adaptation_input)
         actions_mean = self.actor_body(torch.cat((observation_history, latent), dim=-1))
