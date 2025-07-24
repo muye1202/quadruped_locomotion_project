@@ -1,6 +1,3 @@
-# import isaacgym
-
-# assert isaacgym, "import isaacgym before pytorch"
 import torch
 
 
@@ -20,21 +17,29 @@ class HistoryWrapper:
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
         privileged_obs = info["privileged_obs"]
+        depth_obs = info.get("depth_obs")   # Muye
 
         self.obs_history = torch.cat((self.obs_history[:, self.env.num_obs:], obs), dim=-1)
-        return {'obs': obs, 'privileged_obs': privileged_obs, 'obs_history': self.obs_history}, rew, done, info
+        return {'obs': obs, 'privileged_obs': privileged_obs, 'depth_obs': depth_obs,
+                'obs_history': self.obs_history}, rew, done, info
 
     def get_observations(self):
         obs = self.env.get_observations()
         privileged_obs = self.env.get_privileged_observations()
+        depth_obs = self.env.depth_images if getattr(self.env, 'depth_images', None) is not None else None
+
         self.obs_history = torch.cat((self.obs_history[:, self.env.num_obs:], obs), dim=-1)
-        return {'obs': obs, 'privileged_obs': privileged_obs, 'obs_history': self.obs_history}
+        return {'obs': obs, 'privileged_obs': privileged_obs, 
+                'depth_obs': depth_obs, 'obs_history': self.obs_history}   # Muye
 
     def get_obs(self):
         obs = self.env.get_obs()
         privileged_obs = self.env.get_privileged_observations()
+        depth_obs = self.env.depth_images if getattr(self.env, 'depth_images', None) is not None else None
+
         self.obs_history = torch.cat((self.obs_history[:, self.env.num_obs:], obs), dim=-1)
-        return {'obs': obs, 'privileged_obs': privileged_obs, 'obs_history': self.obs_history}
+        return {'obs': obs, 'privileged_obs': privileged_obs, 
+                'depth_obs': depth_obs, 'obs_history': self.obs_history}
 
     def reset_idx(self, env_ids):  # it might be a problem that this isn't getting called!!
         ret = self.env.reset_idx(env_ids)
@@ -44,8 +49,11 @@ class HistoryWrapper:
     def reset(self):
         ret = self.env.reset()
         privileged_obs = self.env.get_privileged_observations()
+        depth_obs = self.env.depth_images if getattr(self.env, 'depth_images', None) is not None else None
+
         self.obs_history[:, :] = 0
-        return {"obs": ret, "privileged_obs": privileged_obs, "obs_history": self.obs_history}
+        return {"obs": ret, "privileged_obs": privileged_obs, 
+                "depth_obs": depth_obs, "obs_history": self.obs_history}
 
     def __getattr__(self, name):
         return getattr(self.env, name)

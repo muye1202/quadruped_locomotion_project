@@ -8,7 +8,6 @@ from ml_logger import logger
 from params_proto import PrefixProto
 
 from .actor_critic import ActorCritic
-from .rollout_storage import RolloutStorage
 
 
 def class_to_dict(obj) -> dict:
@@ -77,11 +76,6 @@ class Runner:
             print("in runner resume")
             # load pretrained weights from resume_path
             from ml_logger import ML_Logger
-            # loader = ML_Logger(root="http://escher.csail.mit.edu:8080",
-            #                    prefix=RunnerArgs.resume_path)
-            # loader = ML_Logger(root="http://localhost:8080",
-            #         prefix="runs/gait-conditioned-agility/pretrain-v0")
-            # weights = loader.load_torch("checkpoints/ac_weights_last.pt")
             weights = torch.load("runs/gait-conditioned-agility/pretrain-v0/train/025417.456545/checkpoints/ac_weights_last.pt")        
             filtered_weights = {k: v for k, v in weights.items() if "adaptation_module" not in k}
             actor_critic.load_state_dict(state_dict=filtered_weights, strict=False)
@@ -151,8 +145,8 @@ class Runner:
                         actions_eval = self.alg.actor_critic.act_student(obs_history[num_train_envs:], depth_obs[num_train_envs:])
                     ret = self.env.step(torch.cat((actions_train, actions_eval), dim=0))
                     obs_dict, rewards, dones, infos = ret
-                    obs, privileged_obs, obs_history = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict[
-                        "obs_history"]
+                    obs, privileged_obs, obs_history, depth_obs = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict[
+                        "obs_history"], obs_dict["depth_obs"]   # Muye: extract depth_obs
 
                     obs, privileged_obs, depth_obs, obs_history, rewards, dones = obs.to(self.device), privileged_obs.to(
                         self.device), depth_obs.to(self.device), obs_history.to(self.device), rewards.to(self.device), dones.to(self.device)

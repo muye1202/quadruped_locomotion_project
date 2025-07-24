@@ -41,6 +41,9 @@ class VelocityTrackingEasyEnv(LeggedRobot):
             "torques": self.torques.detach().cpu().numpy()
         })
 
+        if self.cfg.env.head_depth_camera:
+            self.extras["depth_obs"] = self.depth_images.clone()
+
         return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
 
     def reset(self):

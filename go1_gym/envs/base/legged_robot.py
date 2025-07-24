@@ -8,6 +8,7 @@ from isaacgym.torch_utils import *
 
 assert gymtorch
 import torch
+import numpy as np
 
 from go1_gym import MINI_GYM_ROOT_DIR
 from go1_gym.envs.base.base_task import BaseTask
@@ -308,13 +309,21 @@ class LeggedRobot(BaseTask):
                                   self.dof_vel[:, :self.num_actuated_dof] * self.obs_scales.dof_vel,
                                   self.actions
                                   ), dim=-1)
-        # if self.cfg.env.observe_command and not self.cfg.env.observe_height_command:
-        #     self.obs_buf = torch.cat((self.projected_gravity,
-        #                               self.commands[:, :3] * self.commands_scale,
-        #                               (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
-        #                               self.dof_vel * self.obs_scales.dof_vel,
-        #                               self.actions
-        #                               ), dim=-1)
+
+        # Muye -> Extract depth images from each env
+        if self.cfg.env.head_depth_camera:
+            self.gym.render_all_camera_sensors(self.sim)
+            self.gym.start_access_image_tensors(self.sim)
+            for i, cam in enumerate(self.head_depth_cameras):
+                depth_handle = self.gym.get_camera_image_gpu_tensor(
+                    self.sim,
+                    self.envs[i],
+                    cam,
+                    gymapi.IMAGE_DEPTH,
+                )
+                depth_tensor = gymtorch.wrap_tensor(depth_handle)
+                self.depth_images[i, 0] = depth_tensor
+            self.gym.end_access_image_tensors(self.sim)
 
         if self.cfg.env.observe_command:
             self.obs_buf = torch.cat((self.projected_gravity,
@@ -337,10 +346,6 @@ class LeggedRobot(BaseTask):
             self.obs_buf = torch.cat((self.obs_buf,
                                       self.clock_inputs), dim=-1)
 
-        # if self.cfg.env.observe_desired_contact_states:
-        #     self.obs_buf = torch.cat((self.obs_buf,
-        #                               self.desired_contact_states), dim=-1)
-
         if self.cfg.env.observe_vel:
             if self.cfg.commands.global_reference:
                 self.obs_buf = torch.cat((self.root_states[:self.num_envs, 7:10] * self.obs_scales.lin_vel,
@@ -362,7 +367,6 @@ class LeggedRobot(BaseTask):
         if self.cfg.env.observe_yaw:
             forward = quat_apply(self.base_quat, self.forward_vec)
             heading = torch.atan2(forward[:, 1], forward[:, 0]).unsqueeze(1)
-            # heading_error = torch.clip(0.5 * wrap_to_pi(heading), -1., 1.).unsqueeze(1)
             self.obs_buf = torch.cat((self.obs_buf,
                                       heading), dim=-1)
 
@@ -1204,7 +1208,7 @@ class LeggedRobot(BaseTask):
         self.desired_contact_states = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device,
                                                   requires_grad=False, )
 
-
+ 
         self.feet_air_time = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float,
                                          device=self.device, requires_grad=False)
         self.last_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device,
@@ -1234,6 +1238,12 @@ class LeggedRobot(BaseTask):
                 if self.cfg.control.control_type in ["P", "V"]:
                     print(f"PD gain of joint {name} were not defined, setting them to zero")
         self.default_dof_pos = self.default_dof_pos.unsqueeze(0)
+
+        # Muye -> Init depth images tensors
+        if self.cfg.env.head_depth_camera:
+            H = self.cfg.env.depth_camera_height_px
+            W = self.cfg.env.depth_camera_width_px
+            self.depth_images = torch.zeros((self.num_envs, 1, H, W), device=self.device, dtype=torch.float)
 
         if self.cfg.control.control_type == "actuator_net":
             actuator_path = f'{os.path.dirname(os.path.dirname(os.path.realpath(__file__)))}/../../resources/actuator_nets/unitree_go1.pt'
@@ -1602,6 +1612,22 @@ class LeggedRobot(BaseTask):
                 self.gym.set_camera_location(self.rendering_camera_eval, self.envs[self.num_train_envs],
                                              gymapi.Vec3(1.5, 1, 3.0),
                                              gymapi.Vec3(0, 0, 0))
+
+        if self.cfg.env.head_depth_camera:
+            self.head_depth_cameras = []
+            self.depth_camera_props = gymapi.CameraProperties()
+            self.depth_camera_props.width = self.cfg.env.depth_camera_width_px
+            self.depth_camera_props.height = self.cfg.env.depth_camera_height_px
+            self.depth_camera_props.enable_tensors = True
+            for env_handle, actor_handle in zip(self.envs, self.actor_handles):
+                cam = self.gym.create_camera_sensor(env_handle, self.depth_camera_props)
+                body_handle = self.gym.find_actor_rigid_body_handle(env_handle, actor_handle, "trunk")
+                cam_transform = gymapi.Transform()
+                cam_transform.p = gymapi.Vec3(0.2, 0.0, 0.1)
+                cam_transform.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
+                self.gym.attach_camera_to_body(cam, env_handle, body_handle, cam_transform, gymapi.FOLLOW_TRANSFORM)
+                self.head_depth_cameras.append(cam)
+
         self.video_writer = None
         self.video_frames = []
         self.video_frames_eval = []
@@ -1671,6 +1697,41 @@ class LeggedRobot(BaseTask):
         if self.complete_video_frames_eval is None:
             return []
         return self.complete_video_frames_eval
+    
+    def get_head_pose(self, env_id=0):
+        """Return position and orientation of the robot head in world frame."""
+        trunk_idx = self.gym.find_actor_rigid_body_handle(self.envs[env_id], self.actor_handles[env_id], "trunk")
+        rb_state = self.rigid_body_state.view(self.num_envs, self.num_bodies, 13)[env_id, trunk_idx]
+        pos = rb_state[0:3]
+        quat = rb_state[3:7]
+        offset = torch.tensor([0.2, 0.0, 0.1], device=self.device)
+        head_pos = pos + quat_rotate(quat, offset)
+        return head_pos, quat
+
+    def get_depth_images(self):
+        """Return the latest depth images for all environments."""
+        if not self.cfg.env.head_depth_camera:
+            return None
+        return self.depth_images
+
+    def get_depth(self, env_id=0):
+        """Return a depth image from the head-mounted camera as a ``torch.Tensor``."""
+        if not self.cfg.env.head_depth_camera:
+            return None
+        
+        # make sure the camera images are up to date
+        self.gym.render_all_camera_sensors(self.sim)
+        self.gym.start_access_image_tensors(self.sim)
+        depth_handle = self.gym.get_camera_image_gpu_tensor(
+            self.sim,
+            self.envs[env_id],
+            self.head_depth_cameras[env_id],
+            gymapi.IMAGE_DEPTH,
+        )
+        depth_tensor = gymtorch.wrap_tensor(depth_handle)
+        depth_img = depth_tensor.clone()
+        self.gym.end_access_image_tensors(self.sim)
+        return depth_img
 
     def _get_env_origins(self, env_ids, cfg):
         """ Sets environment origins. On rough terrain the origins are defined by the terrain platforms.
