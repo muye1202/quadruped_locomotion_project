@@ -36,6 +36,10 @@ class Cfg(PrefixProto, cli=False):
         debug_viz = False
         all_agents_share = False
 
+        head_depth_camera = False
+        depth_camera_width_px = 64
+        depth_camera_height_px = 48
+
         priv_observe_friction = True
         priv_observe_friction_indep = True
         priv_observe_ground_friction = False

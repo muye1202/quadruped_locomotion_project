@@ -20,9 +20,7 @@ def load_and_run_policy(label, depth, experiment_name, max_vel=1.0, max_yaw_vel=
 
     with open(logdir+"/parameters.pkl", 'rb') as file:
         pkl_cfg = pkl.load(file)
-        # print(pkl_cfg.keys())
         cfg = pkl_cfg["Cfg"]
-        # print(cfg.keys())
 
 
     se = StateEstimator(lc)
@@ -104,4 +102,3 @@ if __name__ == '__main__':
     experiment_name = "example_experiment"
 
     load_and_run_policy(depth_label, depth=True, experiment_name=experiment_name, max_vel=3.5, max_yaw_vel=5.0)
-    # load_and_run_policy(label, depth=False, experiment_name=experiment_name, max_vel=3.5, max_yaw_vel=5.0)
