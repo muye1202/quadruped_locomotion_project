@@ -154,8 +154,7 @@ class Go1RealSense:
 
   def get_latest_frame(self):
       if self.depth_image is not None:
-          return self.depth_image
-
+          return self.depth_images
       return None
 
   def start_depth_thread(self):
