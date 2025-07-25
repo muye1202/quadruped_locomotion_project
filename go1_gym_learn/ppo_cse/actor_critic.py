@@ -4,6 +4,30 @@ from params_proto import PrefixProto
 from torch.distributions import Normal
 
 from go1_gym_learn.ppo_cse.conv2d import Conv2dHeadModel, DepthEncoder
+from torch.nn import TransformerEncoder, TransformerEncoderLayer
+
+
+class TransformerActor(nn.Module):
+    """Simple Transformer-based actor network."""
+
+    def __init__(self, input_dim, num_actions, nhead=4, num_layers=2):
+        super().__init__()
+        encoder_layer = TransformerEncoderLayer(
+            d_model=input_dim,
+            nhead=nhead,
+            batch_first=True,
+            activation="relu",
+        )
+        self.transformer = TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.fc = nn.Linear(input_dim, num_actions)
+
+    def forward(self, x):
+        # x shape: (batch, input_dim)
+        x = x.unsqueeze(1)  # add sequence dimension
+        x = self.transformer(x)
+        x = x.squeeze(1)
+        return self.fc(x)
+
 
 class AC_Args(PrefixProto, cli=False):
     # policy
@@ -11,6 +35,10 @@ class AC_Args(PrefixProto, cli=False):
     actor_hidden_dims = [512, 256, 128]
     critic_hidden_dims = [512, 256, 128]
     activation = 'elu'  # can be elu, relu, selu, crelu, lrelu, tanh, sigmoid
+
+    actor_model = 'mlp'  # 'mlp' or 'transformer'
+    transformer_nhead = 4
+    transformer_num_layers = 2
 
     adaptation_module_branch_hidden_dims = [256, 128]
 
@@ -52,19 +80,28 @@ class ActorCritic(nn.Module):
                 adaptation_module_layers.append(activation)
         self.adaptation_module = nn.Sequential(*adaptation_module_layers)
 
-
-
         # Policy
-        actor_layers = []
-        actor_layers.append(nn.Linear(self.num_privileged_obs + self.num_obs_history, AC_Args.actor_hidden_dims[0]))
-        actor_layers.append(activation)
-        for l in range(len(AC_Args.actor_hidden_dims)):
-            if l == len(AC_Args.actor_hidden_dims) - 1:
-                actor_layers.append(nn.Linear(AC_Args.actor_hidden_dims[l], num_actions))
-            else:
-                actor_layers.append(nn.Linear(AC_Args.actor_hidden_dims[l], AC_Args.actor_hidden_dims[l + 1]))
-                actor_layers.append(activation)
-        self.actor_body = nn.Sequential(*actor_layers)
+        actor_input_dim = self.num_privileged_obs + self.num_obs_history
+        if AC_Args.actor_model == 'transformer':
+            self.actor_body = TransformerActor(
+                actor_input_dim,
+                num_actions,
+                nhead=AC_Args.transformer_nhead,
+                num_layers=AC_Args.transformer_num_layers,
+            )
+            actor_desc = "Actor Transformer"
+        else:
+            actor_layers = []
+            actor_layers.append(nn.Linear(actor_input_dim, AC_Args.actor_hidden_dims[0]))
+            actor_layers.append(activation)
+            for l in range(len(AC_Args.actor_hidden_dims)):
+                if l == len(AC_Args.actor_hidden_dims) - 1:
+                    actor_layers.append(nn.Linear(AC_Args.actor_hidden_dims[l], num_actions))
+                else:
+                    actor_layers.append(nn.Linear(AC_Args.actor_hidden_dims[l], AC_Args.actor_hidden_dims[l + 1]))
+                    actor_layers.append(activation)
+            self.actor_body = nn.Sequential(*actor_layers)
+            actor_desc = "Actor MLP"
 
         # Value function
         critic_layers = []
@@ -79,7 +116,7 @@ class ActorCritic(nn.Module):
         self.critic_body = nn.Sequential(*critic_layers)
 
         print(f"Adaptation Module: {self.adaptation_module}")
-        print(f"Actor MLP: {self.actor_body}")
+        print(f"{actor_desc}: {self.actor_body}")
         print(f"Critic MLP: {self.critic_body}")
 
         # Action noise
@@ -88,9 +125,7 @@ class ActorCritic(nn.Module):
         # disable args validation for speedup
         Normal.set_default_validate_args = False
 
-
         #Guo
-        # self.visual_obs_slice = slice(48, 3120, None), (1, 48, 64)
         self.visual_obs_slice = slice(70, 3142, None), (1, 48, 64)
         self.visual_latent_size = 256
         self.visual_kwargs = dict(
@@ -137,8 +172,7 @@ class ActorCritic(nn.Module):
         depth_latent = self.depth_encoder(depth_obs)
         concat_adaptation_input = torch.cat((observation_history, depth_latent),dim=-1)
         latent = self.adaptation_module(concat_adaptation_input)
-        # 
-        # mean = self.actor_body(torch.cat((observation_history, latent), dim=-1))
+
         mean = self.actor_body(torch.cat((observation_history, latent), dim=-1))
         self.distribution = Normal(mean, mean * 0. + self.std)
 
