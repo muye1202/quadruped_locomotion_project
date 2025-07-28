@@ -6,7 +6,7 @@ import numpy as np
 from params_proto import PrefixProto
 
 from go1_gym_learn.ppo_cse import ActorCritic
-from go1_gym_learn.ppo_cse import RolloutStorage
+from go1_gym_learn.ppo_cse.rollout_storage import RolloutStorage
 from go1_gym_learn.ppo_cse import caches
 
 
@@ -174,9 +174,9 @@ class PPO:
                 adaptation_pred = self.actor_critic.adaptation_module(concat_adaptation_input)
                 with torch.no_grad():
                     adaptation_target = privileged_obs_batch
-                    # residual = (adaptation_target - adaptation_pred).norm(dim=1)
-                    # caches.slot_cache.log(env_bins_batch[:, 0].cpu().numpy().astype(np.uint8),
-                    #                       sysid_residual=residual.cpu().numpy())
+                    residual = (adaptation_target - adaptation_pred).norm(dim=1)
+                    caches.slot_cache.log(env_bins_batch[:, 0].cpu().numpy().astype(np.uint8),
+                                          sysid_residual=residual.cpu().numpy())
 
                 selection_indices = torch.linspace(0, adaptation_pred.shape[1]-1, steps=adaptation_pred.shape[1], dtype=torch.long)
                 if PPO_Args.selective_adaptation_module_loss:
@@ -185,8 +185,6 @@ class PPO:
 
                 adaptation_loss = F.mse_loss(adaptation_pred[:num_train, selection_indices], adaptation_target[:num_train, selection_indices])
                 adaptation_test_loss = F.mse_loss(adaptation_pred[num_train:, selection_indices], adaptation_target[num_train:, selection_indices])
-
-
 
                 self.adaptation_module_optimizer.zero_grad()
                 adaptation_loss.backward()

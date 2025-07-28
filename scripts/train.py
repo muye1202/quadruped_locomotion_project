@@ -1,3 +1,21 @@
+import sys
+sys.path.append("/workspace/project/")
+
+# Patch
+import params_proto
+from isaacgym import gymutil
+
+
+_orig_parse = gymutil.parse_sim_config
+def _parse_sim_config(cfg, sim_params):
+    # unwrap any Meta sections
+    for k, v in list(cfg.items()):
+        if isinstance(v, params_proto.Meta):
+            cfg[k] = dict(vars(v))
+    return _orig_parse(cfg, sim_params)
+gymutil.parse_sim_config = _parse_sim_config
+
+
 def train_go1(headless=True):
 
     import isaacgym
@@ -204,15 +222,24 @@ def train_go1(headless=True):
     Cfg.commands.binary_phases = True
     Cfg.commands.gaitwise_curricula = True
 
+    Cfg.sim.use_gpu_pipeline = True
+    Cfg.sim.use_graphics_api  = True
+
     env = VelocityTrackingEasyEnv(sim_device='cuda:0', headless=True, cfg=Cfg)
 
     # log the experiment parameters
     logger.log_params(AC_Args=vars(AC_Args), PPO_Args=vars(PPO_Args), RunnerArgs=vars(RunnerArgs),
                       Cfg=vars(Cfg))
 
+    print("\033[31m Got here \033[0m")
+
     env = HistoryWrapper(env)
     gpu_id = 0
-    runner = Runner(env, device=f"cuda:{gpu_id}", visual_encoder="vit")
+
+    print("\033[31m Got before Runner class init \033[0m")
+    runner = Runner(env, device=f"cuda:{gpu_id}")
+
+    print("\033[31m Got before learn function starts \033[0m")
     runner.learn(num_learning_iterations=10, init_at_random_ep_len=True, eval_freq=100)
 
 
@@ -253,4 +280,4 @@ if __name__ == '__main__':
                 """, filename=".charts.yml", dedent=True)
 
     # to see the environment rendering, set headless=False
-    train_go1(headless=False)
+    train_go1(headless=True)

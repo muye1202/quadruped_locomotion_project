@@ -1,0 +1,4 @@
+# Packages that need to be installed inside Docker image
+ml_logger
+gym
+numpy<1.24
