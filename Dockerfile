@@ -11,19 +11,16 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
  && apt-get install -y --allow-unauthenticated --no-install-recommends \
       python3.8 python3.8-dev python3-pip python3.8-venv git \
       build-essential libcurl4-openssl-dev libssl-dev \
-      libvulkan1 libvulkan-dev vulkan-tools \
+      libvulkan1 libvulkan-dev vulkan-tools vulkan-utils \
       vulkan-validationlayers libgl1-mesa-glx libx11-6 \
+      mesa-vulkan-drivers \
  && rm -rf /var/lib/apt/lists/*
-
-RUN apt-get install -y --no-install-recommends \
-     libnvidia-gl-550 \
-     libnvidia-vulkan-550 \
-     vulkan-utils
 
 # Python setup
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1 \
  && python -m pip install --upgrade pip \
- && python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+ && python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118 \
+ && python -m pip install ml_logger
 
 # Install IsaacGym
 COPY IsaacGym_Preview_4_Package /workspace/IsaacGym

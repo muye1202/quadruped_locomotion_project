@@ -51,7 +51,7 @@ class RunnerArgs(PrefixProto, cli=False):
     log_freq = 10
 
     # load and resume
-    resume = True
+    resume = False
     load_run = -1  # -1 = last run
     checkpoint = -1  # -1 = last saved model
     resume_path = None  # updated from load_run and chkpt
@@ -117,10 +117,11 @@ class Runner:
         # split train and test envs
         num_train_envs = self.env.num_train_envs
 
-        obs_dict = self.env.get_observations()  # TODO: check, is this correct on the first step?
+        obs_dict = self.env.get_observations()
+
+        print("\033[31m initial obs_dict -> \n \033[0m", obs_dict)
+
         obs, privileged_obs, depth_obs, obs_history = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict["depth_obs"], obs_dict["obs_history"]
-        obs, privileged_obs, depth_obs, obs_history = obs.to(self.device), privileged_obs.to(self.device), depth_obs.to(self.device), obs_history.to(
-            self.device)
         self.alg.actor_critic.train()  # switch to train mode (for dropout for example)
 
         rewbuffer = deque(maxlen=100)
@@ -143,7 +144,6 @@ class Runner:
                                                                          privileged_obs[num_train_envs:])
                     else:
                         actions_eval = self.alg.actor_critic.act_student(obs_history[num_train_envs:], depth_obs[num_train_envs:])
-
                     ret = self.env.step(torch.cat((actions_train, actions_eval), dim=0))
                     obs_dict, rewards, dones, infos = ret
                     obs, privileged_obs, obs_history, depth_obs = obs_dict["obs"], obs_dict["privileged_obs"], obs_dict[
@@ -201,8 +201,7 @@ class Runner:
                                          "distribution": distribution},
                                          path=f"curriculum/distribution.pkl", append=True)
 
-            mean_value_loss, mean_surrogate_loss, mean_adaptation_module_loss, mean_decoder_loss, \
-            mean_decoder_loss_student, mean_adaptation_module_test_loss, mean_decoder_test_loss, mean_decoder_test_loss_student = self.alg.update()
+            mean_value_loss, mean_surrogate_loss, mean_adaptation_module_loss, mean_decoder_loss, mean_decoder_loss_student, mean_adaptation_module_test_loss, mean_decoder_test_loss, mean_decoder_test_loss_student = self.alg.update()
             stop = time.time()
             learn_time = stop - start
 

@@ -19,7 +19,18 @@ class HistoryWrapper(gym.Wrapper):
         # privileged information and observation history are stored in info
         obs, rew, done, info = self.env.step(action)
         privileged_obs = info["privileged_obs"]
-        depth_obs = info.get("depth_obs")   # Muye
+        depth_obs = info.get("depth_obs")
+
+        if depth_obs is None:
+            if getattr(self.env, 'depth_images', None) is not None:
+                depth_obs = self.env.depth_images
+            else:
+                # fall back to zeros if depth images are not available
+                h = getattr(self.env.cfg.env, 'depth_camera_height_px', 1)
+                w = getattr(self.env.cfg.env, 'depth_camera_width_px', 1)
+                depth_obs = torch.zeros(self.env.num_envs, 1, h, w,
+                                        device=self.env.device,
+                                        dtype=torch.float)
 
         self.obs_history = torch.cat((self.obs_history[:, self.env.num_obs:], obs), dim=-1)
         return {'obs': obs, 'privileged_obs': privileged_obs, 'depth_obs': depth_obs,
@@ -28,9 +39,18 @@ class HistoryWrapper(gym.Wrapper):
     def get_observations(self):
         obs = self.env.get_observations()
         privileged_obs = self.env.get_privileged_observations()
-        depth_obs = self.env.depth_images if getattr(self.env, 'depth_images', None) is not None else None   # Muye
+
+        if getattr(self.env, 'depth_images', None) is not None:
+            depth_obs = self.env.depth_images
+        else:
+            h = getattr(self.env.cfg.env, 'depth_camera_height_px', 1)
+            w = getattr(self.env.cfg.env, 'depth_camera_width_px', 1)
+            depth_obs = torch.zeros(self.env.num_envs, 1, h, w,
+                                    device=self.env.device,
+                                    dtype=torch.float)
+
         self.obs_history = torch.cat((self.obs_history[:, self.env.num_obs:], obs), dim=-1)
-        return {'obs': obs, 'privileged_obs': privileged_obs, 
+        return {'obs': obs, 'privileged_obs': privileged_obs,
                 'depth_obs': depth_obs, 'obs_history': self.obs_history}   # Muye
 
     def reset_idx(self, env_ids):  # it might be a problem that this isn't getting called!!
@@ -41,7 +61,16 @@ class HistoryWrapper(gym.Wrapper):
     def reset(self):
         ret = super().reset()
         privileged_obs = self.env.get_privileged_observations()
-        depth_obs = self.env.depth_images if getattr(self.env, 'depth_images', None) is not None else None
+
+        if getattr(self.env, 'depth_images', None) is not None:
+            depth_obs = self.env.depth_images
+        else:
+            h = getattr(self.env.cfg.env, 'depth_camera_height_px', 1)
+            w = getattr(self.env.cfg.env, 'depth_camera_width_px', 1)
+            depth_obs = torch.zeros(self.env.num_envs, 1, h, w,
+                                    device=self.env.device,
+                                    dtype=torch.float)
+
         self.obs_history[:, :] = 0
         return {"obs": ret, "privileged_obs": privileged_obs, "depth_obs": depth_obs, "obs_history": self.obs_history}
 
